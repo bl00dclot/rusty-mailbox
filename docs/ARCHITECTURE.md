@@ -120,6 +120,8 @@ loop
 | MX lookup: NXDOMAIN | `Permanent` | `Failed` |
 | MX lookup: null MX (a `.` exchange) | `Permanent` | `Failed` |
 | MX lookup: no MX records | try the domain itself | |
+| MX hosts resolve, but to no public address (`is_public`) | `Permanent` | `Failed` |
+| MX hosts: no public address, and a lookup failed | `Transient` | `Deferred` or `Expired` |
 | MX lookup: any other DNS error, or no resolver configuration | `Transient` | `Deferred` or `Expired` |
 | The stored sender or recipient no longer parses | `Permanent` | `Failed` |
 
@@ -143,7 +145,7 @@ Clamping to the deadline means the last attempt happens exactly at `max_age`, an
 The transport is built fresh for every host of every attempt (`deliver::transport`):
 
 ```rust,ignore
-AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
+AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(addr)
     .port(port)
     .tls(/* Required | Opportunistic | None */)
     .hello_name(ClientId::Domain(helo))
@@ -151,7 +153,7 @@ AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
 ```
 
 - `builder_dangerous` means "no TLS preset". It is safe here because `.tls(...)` is always set from `Tls`, and `open` already refused the unsafe combinations.
-- `TlsParameters::new(host)` verifies the certificate chain against webpki-roots, the Mozilla root store compiled into the binary, and checks the name against `host`. With `Route::Mx`, `host` is the MX name from DNS.
+- `TlsParameters::new(name)` verifies the certificate chain against webpki-roots, the Mozilla root store compiled into the binary, and checks the name against `name`. With `Route::Host`, the connection and the name are both `host`. With `Route::Mx`, the connection goes to an address that `public_addrs` resolved and checked, and `name` is the MX host from DNS. Connecting to the checked address, instead of letting lettre resolve the name again, means a second DNS answer cannot swap in an internal address.
 - With `Opportunistic`, lettre sends `STARTTLS` only if `EHLO` offered it. If the handshake then fails, the attempt fails; there is no fallback to plain text after a failed handshake.
 - lettre's default timeout (60 s per command) applies. There is no connection pool (lettre's `pool` feature is off), so every attempt pays one TCP and TLS handshake. At low volume that is cheaper than keeping idle connections.
 - `send_raw` takes the stored bytes as they are, so lettre never re-encodes them, and the DKIM signature stays valid.
@@ -184,7 +186,7 @@ The rule, which is also in `CLAUDE.md`: no address and no message content ever l
 - The crate has no logging dependency and prints nothing.
 - `Event` and `Pending` carry only the row id, times, counts and an error string.
 - Every error string passes through `deliver::redact`, which replaces each whitespace-separated word containing `@` with `[address]`, and cuts the text at 500 characters. Server replies are where addresses usually leak: `550 5.1.1 <user@example.net> unknown`.
-- DNS errors are replaced with fixed strings ("MX lookup failed", "recipient domain does not exist"), because hickory's messages name the domain that was queried.
+- DNS errors are replaced with fixed strings ("MX lookup failed", "recipient domain does not exist", "mail host lookup failed", "mail host has no public address"), because hickory's messages name the domain that was queried.
 - Errors without an SMTP reply become a fixed class in `deliver::no_reply` ("connection failed", "TLS failure", "timed out", "bad SMTP reply"), because lettre's source chain can name the recipient's MX host. `redact` is used only for real server replies.
 - `queue::pending` selects only the id, times, attempt count and error columns, never `mail_from`, `rcpt` or `data`.
 
@@ -196,7 +198,8 @@ The rule, which is also in `CLAUDE.md`: no address and no message content ever l
 
 - `backoff` gives 60, 120, … 3840, then 7200 and stays there; a base of 0 stays 0.
 - `mx_hosts` sorts by preference and strips the trailing dot. A `.` exchange is a null MX. No records means the domain itself.
-- `hops` for `Route::Mx` gives port 25, the configured `Tls`, the configured HELO and no credentials.
+- `hops` for `Route::Mx` connects to the checked address, verifies TLS for the MX name, and gives port 25, the configured `Tls`, the configured HELO and no credentials.
+- `is_public` refuses every special-purpose IPv4 and IPv6 block (IANA registries), checks the IPv4 address inside mapped and NAT64 addresses, and passes public unicast.
 
 **Integration tests** (`tests/outbox.rs`) run the real lettre transport through `Route::Host` with `Tls::None` against the fake server in `tests/common/mod.rs`:
 
@@ -210,6 +213,7 @@ The rule, which is also in `CLAUDE.md`: no address and no message content ever l
 | `transient_failure_defers_then_retries` | A 451 gives `Deferred`; `pending()` shows `attempts = 1` and the 451 text; with `retry_base` 0 the next run delivers. |
 | `permanent_failure_deletes_row` | A 550 gives `Failed`, the row is deleted, and the address quoted in the reply is redacted. |
 | `no_listener_defers` | Connection refused gives `Deferred` with the fixed error `connection failed`, and the row stays. |
+| `mx_route_refuses_a_loopback_host` | `Route::Mx` to `postmaster@localhost` (no MX, so the domain itself, which resolves to loopback) gives `Failed` with "mail host has no public address", and nothing connects. Checked by mutation: without the loopback rule it connects and defers. |
 | `expires_past_max_age` | With `max_age` 0, a 451 gives `Expired`, and the row is deleted. |
 | `survives_reopen` | Enqueue, drop the `Outbox`, open the file again: the message still delivers, once. |
 | `open_checks_transport_security` | `Tls::None` to 192.0.2.1 and credentials with `Opportunistic` are refused; `Tls::None` to 127.0.0.1 is allowed. |
@@ -249,7 +253,7 @@ Rejected alternatives:
 The deliberate shortcuts are marked `ponytail:` in the code:
 
 - `src/lib.rs`, `run`: one delivery at a time. The upgrade is per-domain workers with a lease column.
-- `src/deliver.rs`, `attempt`: no MTA-STS or DANE for `Route::Mx`, and no filter for MX hosts that resolve to loopback or private addresses (documented as experimental in the README). The upgrade is an MTA-STS policy fetch and cache (RFC 8461) that restricts the MX list and forces `Tls::Required`, and later DANE (RFC 7672), which needs DNSSEC validation in the resolver. Both belong in `deliver.rs` between `lookup_mx` and `hops`.
+- `src/deliver.rs`, `attempt`: no MTA-STS or DANE for `Route::Mx`. The upgrade is an MTA-STS policy fetch and cache (RFC 8461) that restricts the MX list and forces `Tls::Required`, and later DANE (RFC 7672), which needs DNSSEC validation in the resolver. Both belong in `deliver.rs` between `lookup_mx` and `hops`.
 
 Also not built: bounce processing, connection reuse, Ed25519 DKIM, and a lock that stops two processes running the loop on one file.
 

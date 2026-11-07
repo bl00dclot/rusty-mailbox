@@ -4,6 +4,10 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+### Security
+
+- `Route::Mx` connects only to public addresses: each MX host is resolved, special-purpose addresses (loopback, private, link-local, CGNAT, documentation, multicast) are skipped, and TLS is verified for the MX name. At most 10 addresses per attempt. No MTA-STS or DANE yet.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added
@@ -17,7 +21,7 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - Minimum Rust version 1.98. A C compiler is needed to build AWS-LC.
 - `Event` and `pending()`, both with address redaction. Errors without an SMTP reply are fixed strings.
 - `open` sets the database file to mode `0600`, including a file that already exists, and keeps only the parsed DKIM key, not the PEM.
-- `Route::Mx` is experimental: no MTA-STS or DANE, and no filter for MX hosts on loopback or private addresses.
+- `Route::Mx` has no MTA-STS or DANE.
 - Licensed under MIT OR Apache-2.0.
 
 [Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.0...HEAD

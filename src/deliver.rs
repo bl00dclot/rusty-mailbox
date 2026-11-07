@@ -1,5 +1,6 @@
 //! One SMTP delivery attempt.
 
+use std::net::IpAddr;
 use std::time::Duration;
 
 use hickory_resolver::TokioResolver;
@@ -14,6 +15,10 @@ use crate::queue::Row;
 use crate::{Config, Route, Tls};
 
 const RETRY_CAP: Duration = Duration::from_secs(2 * 60 * 60);
+
+/// At most this many addresses are tried per attempt, so a domain with many MX hosts
+/// cannot hold the single delivery loop for many connection timeouts.
+const MAX_ADDRS: usize = 10;
 
 pub(crate) enum Outcome {
     Delivered,
@@ -49,15 +54,19 @@ pub(crate) fn mx_hosts(
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Hop {
-    pub host: String,
+    /// Where to connect: a host name for `Route::Host`, a checked address for `Route::Mx`.
+    pub addr: String,
+    /// The name the TLS certificate must match.
+    pub name: String,
     pub port: u16,
     pub tls: Tls,
     pub helo: String,
     pub credentials: Option<Credentials>,
 }
 
-/// The connections to try for `route`; `mx` is used only by `Route::Mx`.
-pub(crate) fn hops(route: &Route, helo: &str, mx: Vec<String>) -> Vec<Hop> {
+/// The connections to try for `route`; `mx` (address, MX host name) is used only by
+/// `Route::Mx`.
+pub(crate) fn hops(route: &Route, helo: &str, mx: Vec<(IpAddr, String)>) -> Vec<Hop> {
     match route {
         Route::Host {
             host,
@@ -65,7 +74,8 @@ pub(crate) fn hops(route: &Route, helo: &str, mx: Vec<String>) -> Vec<Hop> {
             tls,
             credentials,
         } => vec![Hop {
-            host: host.clone(),
+            addr: host.clone(),
+            name: host.clone(),
             port: *port,
             tls: *tls,
             helo: helo.to_string(),
@@ -73,8 +83,9 @@ pub(crate) fn hops(route: &Route, helo: &str, mx: Vec<String>) -> Vec<Hop> {
         }],
         Route::Mx { tls } => mx
             .into_iter()
-            .map(|host| Hop {
-                host,
+            .map(|(addr, name)| Hop {
+                addr: addr.to_string(),
+                name,
                 port: 25,
                 tls: *tls,
                 helo: helo.to_string(),
@@ -102,7 +113,10 @@ pub(crate) async fn attempt(
     let mx = match &config.route {
         Route::Host { .. } => Vec::new(),
         Route::Mx { .. } => match lookup_mx(resolver, rcpt.domain()).await {
-            Ok(mx) => mx,
+            Ok(hosts) => match public_addrs(resolver, hosts).await {
+                Ok(mx) => mx,
+                Err(outcome) => return outcome,
+            },
             Err(outcome) => return outcome,
         },
     };
@@ -161,15 +175,91 @@ async fn lookup_mx(
         .map_err(|()| Outcome::Permanent("null MX: the domain accepts no mail".into()))
 }
 
+/// Resolves each MX host and keeps only public addresses, so a recipient domain cannot
+/// point delivery at loopback or an internal network. The loop connects to the checked
+/// address itself; a second lookup at connect time could return a different one.
+async fn public_addrs(
+    resolver: &mut Option<TokioResolver>,
+    hosts: Vec<String>,
+) -> Result<Vec<(IpAddr, String)>, Outcome> {
+    // `lookup_mx` ran first, so the resolver exists.
+    let Some(resolver) = resolver.as_ref() else {
+        return Err(Outcome::Transient("DNS resolver unavailable".into()));
+    };
+    let mut addrs = Vec::new();
+    let mut lookup_failed = false;
+    for host in hosts {
+        match resolver.lookup_ip(format!("{host}.")).await {
+            Ok(lookup) => addrs.extend(
+                lookup
+                    .iter()
+                    .filter(|ip| is_public(*ip))
+                    .map(|ip| (ip, host.clone())),
+            ),
+            Err(e) if e.is_nx_domain() || e.is_no_records_found() => {}
+            Err(_) => lookup_failed = true,
+        }
+        if addrs.len() >= MAX_ADDRS {
+            break;
+        }
+    }
+    addrs.truncate(MAX_ADDRS);
+    match (addrs.is_empty(), lookup_failed) {
+        (false, _) => Ok(addrs),
+        (true, true) => Err(Outcome::Transient("mail host lookup failed".into())),
+        (true, false) => Err(Outcome::Permanent("mail host has no public address".into())),
+    }
+}
+
+/// Whether `ip` is a globally reachable unicast address, from the IANA special-purpose
+/// address registries. `IpAddr::is_global` is still unstable.
+pub(crate) fn is_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, c, _] = v4.octets();
+            !(a == 0
+                || a == 10
+                || a == 127
+                || a >= 224 // multicast, reserved, broadcast
+                || (a == 100 && (64..128).contains(&b)) // shared address space (CGNAT)
+                || (a == 169 && b == 254)
+                || (a == 172 && (16..32).contains(&b))
+                || (a == 192 && b == 0 && (c == 0 || c == 2))
+                || (a == 192 && b == 88 && c == 99) // 6to4 relay anycast
+                || (a == 192 && b == 168)
+                || (a == 198 && (b == 18 || b == 19)) // benchmarking
+                || (a == 198 && b == 51 && c == 100)
+                || (a == 203 && b == 0 && c == 113))
+        }
+        IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public(IpAddr::V4(v4));
+            }
+            let s = v6.segments();
+            // NAT64 well-known prefix: the IPv4 address in the last 32 bits decides.
+            if s[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+                let o = v6.octets();
+                return is_public(IpAddr::V4([o[12], o[13], o[14], o[15]].into()));
+            }
+            // Only global unicast (2000::/3), minus its special-purpose blocks.
+            (s[0] & 0xe000) == 0x2000
+                && !(s[0] == 0x2001 && s[1] < 0x200) // 2001::/23
+                && !(s[0] == 0x2001 && s[1] == 0xdb8) // documentation
+                && s[0] != 0x2002 // 6to4
+                && (s[0] & 0xfff0) != 0x3ff0 // documentation, 3fff::/20
+        }
+    }
+}
+
 fn transport(
     hop: &Hop,
 ) -> Result<AsyncSmtpTransport<Tokio1Executor>, lettre::transport::smtp::Error> {
     let tls = match hop.tls {
-        Tls::Required => SmtpTls::Required(TlsParameters::new(hop.host.clone())?),
-        Tls::Opportunistic => SmtpTls::Opportunistic(TlsParameters::new(hop.host.clone())?),
+        Tls::Required => SmtpTls::Required(TlsParameters::new(hop.name.clone())?),
+        Tls::Opportunistic => SmtpTls::Opportunistic(TlsParameters::new(hop.name.clone())?),
         Tls::None => SmtpTls::None,
     };
-    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&hop.host)
+    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&hop.addr)
         .port(hop.port)
         .tls(tls)
         .hello_name(ClientId::Domain(hop.helo.clone()));
@@ -254,12 +344,84 @@ mod tests {
     }
 
     #[test]
-    fn mx_route_uses_port_25_tls_and_helo() {
+    fn only_public_addresses_pass() {
+        for ip in [
+            "0.0.0.0",
+            "0.1.2.3",
+            "10.1.2.3",
+            "100.64.0.1",
+            "100.127.255.254",
+            "127.0.0.1",
+            "169.254.169.254",
+            "172.16.0.1",
+            "172.31.255.255",
+            "192.0.0.1",
+            "192.0.2.1",
+            "192.88.99.1",
+            "192.168.1.1",
+            "198.18.0.1",
+            "198.19.255.255",
+            "198.51.100.1",
+            "203.0.113.1",
+            "224.0.0.1",
+            "239.255.255.255",
+            "240.0.0.1",
+            "255.255.255.255",
+            "::",
+            "::1",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::1",
+            "100::1",
+            "2001::1",
+            "2001:db8::1",
+            "2002::1",
+            "3fff::1",
+            "5f00::1",
+            "fc00::1",
+            "fd12:3456::1",
+            "fe80::1",
+            "ff02::1",
+        ] {
+            assert!(!is_public(ip.parse().unwrap()), "{ip} passed");
+        }
+        for ip in [
+            "1.1.1.1",
+            "8.8.8.8",
+            "100.63.255.255",
+            "100.128.0.1",
+            "172.15.255.255",
+            "172.32.0.1",
+            "192.0.1.1",
+            "198.17.255.255",
+            "198.20.0.1",
+            "223.255.255.255",
+            "2a00:1450:4001::1a",
+            "2606:4700::1111",
+            "2001:4860::8888",
+            "::ffff:8.8.8.8",
+            "64:ff9b::808:808",
+        ] {
+            assert!(is_public(ip.parse().unwrap()), "{ip} refused");
+        }
+    }
+
+    #[test]
+    fn mx_route_connects_to_the_address_and_verifies_the_name() {
         let route = Route::Mx { tls: Tls::Required };
-        let hops = hops(&route, "srv.example", vec!["a.mx".into(), "b.mx".into()]);
+        let mx = vec![
+            ("192.0.2.10".parse().unwrap(), "a.mx".to_string()),
+            ("2001:db8::1".parse().unwrap(), "b.mx".to_string()),
+        ];
+        let hops = hops(&route, "srv.example", mx);
         assert_eq!(hops.len(), 2);
-        for (hop, host) in hops.iter().zip(["a.mx", "b.mx"]) {
-            assert_eq!(hop.host, host);
+        for (hop, (addr, name)) in hops
+            .iter()
+            .zip([("192.0.2.10", "a.mx"), ("2001:db8::1", "b.mx")])
+        {
+            assert_eq!(hop.addr, addr);
+            assert_eq!(hop.name, name);
             assert_eq!(hop.port, 25);
             assert_eq!(hop.tls, Tls::Required);
             assert_eq!(hop.helo, "srv.example");

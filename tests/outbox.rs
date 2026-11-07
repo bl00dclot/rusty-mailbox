@@ -221,6 +221,25 @@ async fn survives_reopen() {
     assert_eq!(smtp.transactions().len(), 1);
 }
 
+#[tokio::test]
+async fn mx_route_refuses_a_loopback_host() {
+    // `localhost` has no MX, so the domain itself is the host; it resolves to loopback.
+    let cfg = Config::new(Route::Mx { tls: Tls::Required }, "test.example");
+    let outbox = Outbox::open(db_path("mx-loopback"), cfg).unwrap();
+    let mail = Message::builder()
+        .from("noreply@sender.example".parse().unwrap())
+        .to("postmaster@localhost".parse().unwrap())
+        .subject("Hello")
+        .body(String::from("Hello"))
+        .unwrap();
+    outbox.enqueue(mail).unwrap();
+    let events = run_for(&outbox, 1).await;
+    assert!(
+        matches!(&events[..], [Event::Failed { error, .. }] if error == "mail host has no public address"),
+        "{events:?}"
+    );
+}
+
 #[test]
 fn open_checks_transport_security() {
     let plain_remote = Config::new(route("192.0.2.1", 25), "test.example");
