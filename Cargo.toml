@@ -1,0 +1,23 @@
+[package]
+name = "rusty-mailbox"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MIT OR Apache-2.0"
+publish = false
+repository = "https://github.com/bl00dclot/rusty-mailbox"
+readme = "README.md"
+keywords = ["email", "smtp", "outbox", "queue", "dkim"]
+categories = ["email", "asynchronous", "network-programming"]
+description = "Durable SQLite-backed outbox that delivers lettre messages over SMTP in the background"
+
+[dependencies]
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls", "webpki-roots", "aws-lc-rs"] }
+mail-auth = "0.15.1"
+rustls-pki-types = "1.15"
+hickory-resolver = "0.26.3"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+tokio = { version = "1.54.1", features = ["macros", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "signal"] }

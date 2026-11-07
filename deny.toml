@@ -1,0 +1,39 @@
+# cargo-deny 0.20 configuration. CI runs `cargo deny check`: advisories, bans,
+# licenses and sources. See https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# The RustSec advisory database. Unmaintained crates fail anywhere in the graph,
+# unsound ones only in this crate (cargo-deny defaults).
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = [
+    { crate = "rsa", reason = "RUSTSEC-2023-0071 (Marvin timing attack), no fix: DKIM signs with mail-auth on AWS-LC" },
+    { crate = "ring", reason = "one crypto library: rustls and mail-auth both run on AWS-LC" },
+    { crate = "openssl-sys", reason = "TLS is rustls on AWS-LC" },
+    { crate = "native-tls", reason = "TLS is rustls on AWS-LC" },
+    # mail-auth links aws-lc-sys directly. If aws-lc-rs drifts to a newer aws-lc-sys,
+    # AWS-LC is built twice: pin aws-lc-rs in Cargo.lock to the matching release.
+    { crate = "aws-lc-sys", deny-multiple-versions = true, reason = "build AWS-LC once" },
+    { crate = "aws-lc-rs", deny-multiple-versions = true, reason = "build AWS-LC once" },
+]
+
+[licenses]
+# Every license expression in the graph today is satisfiable from this list.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

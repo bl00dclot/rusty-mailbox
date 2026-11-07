@@ -1,0 +1,10 @@
+/target
+# Local tool state
+/.claude/
+.serena/
+# A real outbox holds addresses and messages: never commit one
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+# Local planning notes (name private projects and hosting)
+/docs/TASKS.md
