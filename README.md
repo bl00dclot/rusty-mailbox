@@ -176,7 +176,8 @@ let route = Route::Mx { tls: Tls::Required };
 - Each MX host is resolved and only public addresses are used: loopback, private, link-local, shared (CGNAT), documentation, multicast and other special-purpose addresses are skipped, so a recipient domain cannot point delivery at your internal network. The loop connects to the checked address, and the TLS certificate is verified for the MX host name. A domain whose hosts have no public address is a permanent failure. Use `Route::Host` for an internal relay.
 - The loop moves to the next host only when the connection or the TLS handshake fails. Any SMTP reply, good or bad, settles the attempt.
 - A null MX (RFC 7505) and a domain that does not exist are permanent failures. A domain with no MX records is tried directly, as RFC 5321 says.
-- **No MTA-STS or DANE yet.** DNS decides which host gets the mail, and an attacker who can spoof DNS answers can pick it. `Tls::Required` still demands a valid certificate for whatever host DNS named.
+- **MTA-STS (RFC 8461).** Before each attempt the loop looks up `_mta-sts.<domain>`. If the domain publishes a policy, it is fetched from `https://mta-sts.<domain>/.well-known/mta-sts.txt`, with the certificate verified for that name, and no redirects. In `enforce` mode only MX hosts that the policy lists are tried, and TLS is required with a valid certificate whatever `tls` says. If none match, the attempt is deferred, never failed, because the policy may be updated. `testing` mode and domains without a policy are delivered as before; TLSRPT reports are not sent. Policies are cached in memory for their `max_age`, so an attacker who later strips the TXT record or blocks the fetch cannot turn the policy off. The cache is never written to disk, so no recipient domain outlives the process. A restart forgets it.
+- **No DANE.** Without an MTA-STS policy, DNS decides which host gets the mail, and an attacker who can spoof DNS answers can pick it. `Tls::Required` still demands a valid certificate for whatever host DNS named.
 
 **A local relay:**
 
@@ -292,7 +293,7 @@ Restart=on-failure
   - **Below the file level,** disk blocks freed by the truncation keep their old bytes until the file system reuses them, and a block-level backup or disk image can capture them. Use an encrypted disk if that matters.
   - `open` sets the file to mode `0600`, whether it creates it or finds it.
 - **One row per envelope recipient.** `To`, `Cc` and `Bcc` each get their own transaction, so one bad address never blocks the others, and the `Bcc:` header is removed before signing and storing.
-- **Transport security by default.** `Tls::Required` means STARTTLS with a certificate verified against the Mozilla roots for the host name. `Tls::None` is refused for any host that is not loopback, and credentials are refused without `Tls::Required`. `Route::Mx` connects only to public addresses.
+- **Transport security by default.** `Tls::Required` means STARTTLS with a certificate verified against the Mozilla roots for the host name. `Tls::None` is refused for any host that is not loopback, and credentials are refused without `Tls::Required`. `Route::Mx` connects only to public addresses, and honours a domain's MTA-STS `enforce` policy.
 - **Retries.** Transient failures (4xx, no connection, TLS failure) back off from `retry_base` (default 60 s), doubling, capped at 2 hours. The last try lands on the `max_age` deadline.
 - **Pacing.** One delivery at a time, at least `min_interval` apart (default 0). Set it under your host's sending cap.
 - **No personal data in the output.** The crate does not log. `Event` and `pending()` carry row ids, ages, attempt counts and the server's reply, with any word containing `@` replaced by `[address]`; errors without a reply are fixed strings. A server may still quote other text in its reply, including a recipient's name; treat `error` as operational data.
@@ -338,7 +339,8 @@ A dedicated sending subdomain (`mail.example.com` rather than `example.com`) kee
 
 ## Limits
 
-- **No MTA-STS or DANE** for `Route::Mx`: DNS decides which public host receives the mail. Pin the host with `Route::Host` where that matters.
+- **No DANE** for `Route::Mx`, and no TLSRPT. For a domain without an MTA-STS policy, DNS decides which public host receives the mail. Pin the host with `Route::Host` where that matters.
+- **MTA-STS policies are cached in memory only**, so after a restart the first attempt to a domain trusts DNS for its TXT record again.
 - **One delivery at a time.** Throughput is at most one SMTP transaction per `min_interval` plus the round trip, which suits low volume. A large backlog drains slowly.
 - **No bounce handling.** A server that accepts a message and bounces it later sends the bounce to the envelope sender; the outbox never sees it.
 - **No connection reuse.** Each attempt opens a new connection.

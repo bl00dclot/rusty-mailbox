@@ -12,6 +12,7 @@ use lettre::transport::smtp::extension::ClientId;
 use lettre::{Address, AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 
 use crate::queue::Row;
+use crate::sts::{self, Mode, Policy};
 use crate::{Config, Route, Tls};
 
 const RETRY_CAP: Duration = Duration::from_secs(2 * 60 * 60);
@@ -95,12 +96,31 @@ pub(crate) fn hops(route: &Route, helo: &str, mx: Vec<(IpAddr, String)>) -> Vec<
     }
 }
 
-/// Tries to deliver one row. `resolver` is created on first use by `Route::Mx`.
-pub(crate) async fn attempt(
-    config: &Config,
-    resolver: &mut Option<TokioResolver>,
-    row: &Row,
-) -> Outcome {
+/// State kept across attempts by the delivery loop, for `Route::Mx`.
+#[derive(Default)]
+pub(crate) struct Net {
+    /// Created on first use.
+    resolver: Option<TokioResolver>,
+    sts: sts::Cache,
+}
+
+/// Applies an MTA-STS policy to the MX hosts: in `enforce` mode only matching hosts
+/// remain, and `true` says TLS is required. `testing` and no policy change nothing.
+pub(crate) fn sts_hosts(policy: Option<&Policy>, hosts: Vec<String>) -> (Vec<String>, bool) {
+    match policy {
+        Some(p) if p.mode == Mode::Enforce => (
+            hosts
+                .into_iter()
+                .filter(|h| sts::mx_matches(p, h))
+                .collect(),
+            true,
+        ),
+        _ => (hosts, false),
+    }
+}
+
+/// Tries to deliver one row.
+pub(crate) async fn attempt(config: &Config, net: &mut Net, row: &Row) -> Outcome {
     let Ok(rcpt) = row.rcpt.parse::<Address>() else {
         return Outcome::Permanent("stored recipient does not parse".into());
     };
@@ -110,21 +130,36 @@ pub(crate) async fn attempt(
     let Ok(envelope) = Envelope::new(from, vec![rcpt.clone()]) else {
         return Outcome::Permanent("invalid envelope".into());
     };
-    let mx = match &config.route {
-        Route::Host { .. } => Vec::new(),
-        Route::Mx { .. } => match lookup_mx(resolver, rcpt.domain()).await {
-            Ok(hosts) => match public_addrs(resolver, hosts).await {
-                Ok(mx) => mx,
+    let (mx, sts_enforced) = match &config.route {
+        Route::Host { .. } => (Vec::new(), false),
+        Route::Mx { .. } => {
+            let resolver = &mut net.resolver;
+            let hosts = match lookup_mx(resolver, rcpt.domain()).await {
+                Ok(hosts) => hosts,
                 Err(outcome) => return outcome,
-            },
-            Err(outcome) => return outcome,
-        },
+            };
+            let policy = match resolver.as_ref() {
+                Some(r) => sts::policy(&mut net.sts, r, rcpt.domain()).await,
+                None => None,
+            };
+            let (hosts, enforced) = sts_hosts(policy.as_ref(), hosts);
+            if hosts.is_empty() {
+                // RFC 8461 §5.1: never a permanent failure; the policy may be updated.
+                return Outcome::Transient("no MX host matches the MTA-STS policy".into());
+            }
+            match public_addrs(resolver, hosts).await {
+                Ok(mx) => (mx, enforced),
+                Err(outcome) => return outcome,
+            }
+        }
     };
-    // ponytail: MX hosts are trusted as DNS returns them; no MTA-STS or DANE yet, so an
-    // on-path attacker who spoofs DNS picks the host. Add MTA-STS (RFC 8461) policy fetch
-    // and DANE (RFC 7672, needs DNSSEC validation) before relying on Route::Mx for secrecy.
+    // ponytail: MTA-STS but no DANE (RFC 7672, needs a DNSSEC-validating resolver and TLSA
+    // checks in the TLS verifier). Without a policy, DNS still picks the MX host.
     let mut last = String::from("no host to try");
-    for hop in hops(&config.route, &config.helo, mx) {
+    for mut hop in hops(&config.route, &config.helo, mx) {
+        if sts_enforced {
+            hop.tls = Tls::Required;
+        }
         let transport = match transport(&hop) {
             Ok(t) => t,
             Err(e) => return Outcome::Transient(no_reply(&e).into()),
@@ -190,12 +225,13 @@ async fn public_addrs(
     let mut lookup_failed = false;
     for host in hosts {
         match resolver.lookup_ip(format!("{host}.")).await {
-            Ok(lookup) => addrs.extend(
-                lookup
-                    .iter()
-                    .filter(|ip| is_public(*ip))
-                    .map(|ip| (ip, host.clone())),
-            ),
+            Ok(lookup) => {
+                let mut public: Vec<IpAddr> = lookup.iter().filter(|ip| is_public(*ip)).collect();
+                // IPv4 first: resolvers often list IPv6 first, and not every host can
+                // reach IPv6, so IPv6 alone must not use up MAX_ADDRS.
+                public.sort_by_key(IpAddr::is_ipv6);
+                addrs.extend(public.into_iter().map(|ip| (ip, host.clone())));
+            }
             Err(e) if e.is_nx_domain() || e.is_no_records_found() => {}
             Err(_) => lookup_failed = true,
         }
@@ -341,6 +377,33 @@ mod tests {
             mx_hosts("example.org", Some(vec![])).unwrap(),
             ["example.org"]
         );
+    }
+
+    #[test]
+    fn sts_enforce_keeps_matching_mx_and_requires_tls() {
+        use crate::sts::{Mode, Policy};
+        let hosts = || vec!["mx1.example.com".to_string(), "evil.example".to_string()];
+        let policy = |mode| Policy {
+            mode,
+            mx: vec!["*.example.com".into()],
+            max_age: 60,
+        };
+        assert_eq!(
+            sts_hosts(Some(&policy(Mode::Enforce)), hosts()),
+            (vec!["mx1.example.com".to_string()], true)
+        );
+        // Testing mode and no policy deliver as before (no TLSRPT reports are sent).
+        assert_eq!(
+            sts_hosts(Some(&policy(Mode::Testing)), hosts()),
+            (hosts(), false)
+        );
+        assert_eq!(sts_hosts(None, hosts()), (hosts(), false));
+        // Nothing matches: no host to try, and the attempt is transient (§5.1).
+        let none = Policy {
+            mx: vec!["other.example".into()],
+            ..policy(Mode::Enforce)
+        };
+        assert_eq!(sts_hosts(Some(&none), hosts()), (vec![], true));
     }
 
     #[test]

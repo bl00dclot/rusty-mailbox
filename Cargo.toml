@@ -17,7 +17,9 @@ mail-auth = "0.15.1"
 rustls-pki-types = "1.15"
 hickory-resolver = "0.26.3"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
-tokio = { version = "1.54.1", features = ["macros", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["macros", "sync", "time", "net", "io-util"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
+webpki-roots = "1.0.11"
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "signal"] }

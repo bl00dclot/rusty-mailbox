@@ -1216,6 +1216,8 @@ dependencies = [
  "rusqlite",
  "rustls-pki-types",
  "tokio",
+ "tokio-rustls",
+ "webpki-roots",
 ]
 
 [[package]]

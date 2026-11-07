@@ -3,6 +3,7 @@
 
 mod deliver;
 mod queue;
+mod sts;
 
 use std::fmt;
 use std::future::Future;
@@ -30,7 +31,8 @@ pub enum Route {
     ///
     /// Moves to the next host only when the connection or TLS handshake fails. A null MX
     /// or a domain that does not exist is a permanent failure; a domain without MX records
-    /// is tried directly. No MTA-STS or DANE.
+    /// is tried directly. Only public addresses are used. A domain's MTA-STS (RFC 8461)
+    /// `enforce` policy limits the hosts and requires verified TLS; no DANE.
     Mx {
         /// Transport security for every MX host. [`Tls::None`] is refused.
         tls: Tls,
@@ -302,7 +304,7 @@ impl Outbox {
         mut on_event: F,
     ) -> Result<(), Error> {
         tokio::pin!(shutdown);
-        let mut resolver = None;
+        let mut net = deliver::Net::default();
         let mut last_attempt: Option<Instant> = None;
         // A row was deleted since the WAL was last truncated.
         let mut residue = true;
@@ -341,7 +343,7 @@ impl Outbox {
             let outcome = tokio::select! {
                 biased;
                 () = &mut shutdown => return Ok(()),
-                o = deliver::attempt(&self.config, &mut resolver, &row) => o,
+                o = deliver::attempt(&self.config, &mut net, &row) => o,
             };
             last_attempt = Some(Instant::now());
             let event = self.settle(&row, outcome)?;

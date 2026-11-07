@@ -15,7 +15,7 @@ This document is for people changing the crate. The README covers how to use it.
      next due row? ── no ──► sleep until due / woken / 60 s / shutdown
        │ yes
      wait min_interval since the last attempt
-     deliver::attempt ──► (MX lookup) ──► lettre SMTP + STARTTLS ──► server
+     deliver::attempt ──► (MX, MTA-STS, A/AAAA) ──► lettre SMTP + STARTTLS ──► server
      settle: delete (Delivered, Failed, Expired) or reschedule (Deferred)
      on_event(Event)
 ```
@@ -28,7 +28,8 @@ One process owns one SQLite file. `enqueue` and `pending` can be called from any
 | --- | --- |
 | `src/lib.rs` | The public API (`Outbox`, `Config`, `Route`, `Tls`, `Event`, `Pending`, `Error`), the checks in `open`, `enqueue`, the delivery loop (`run`) and what happens to a row after an attempt (`settle`). |
 | `src/queue.rs` | The SQLite file: opening it with the right pragmas and permissions, the schema and its migrations, and one function per query. It knows nothing about SMTP. |
-| `src/deliver.rs` | One delivery attempt: which hosts to try (`hops`, `mx_hosts`), the MX lookup, building the lettre transport, classifying the result (`Outcome`), the backoff schedule and `redact`. It knows nothing about SQLite. |
+| `src/deliver.rs` | One delivery attempt: which hosts to try (`hops`, `mx_hosts`, `sts_hosts`), the MX and address lookups (`public_addrs`, `is_public`), building the lettre transport, classifying the result (`Outcome`), the backoff schedule and `redact`. It knows nothing about SQLite. |
+| `src/sts.rs` | MTA-STS (RFC 8461): the `_mta-sts` TXT lookup (`txt_id`), the HTTPS policy fetch, parsing (`parse_policy`, `http_body`), MX matching (`mx_matches`) and the in-memory `Cache` with its rules (`next`). |
 
 `lib.rs` is the only module that touches both: it reads a `queue::Row`, passes it to `deliver::attempt`, and writes the outcome back with `queue`.
 
@@ -120,6 +121,7 @@ loop
 | MX lookup: NXDOMAIN | `Permanent` | `Failed` |
 | MX lookup: null MX (a `.` exchange) | `Permanent` | `Failed` |
 | MX lookup: no MX records | try the domain itself | |
+| MTA-STS `enforce`, and no MX host matches the policy | `Transient` | `Deferred` or `Expired` |
 | MX hosts resolve, but to no public address (`is_public`) | `Permanent` | `Failed` |
 | MX hosts: no public address, and a lookup failed | `Transient` | `Deferred` or `Expired` |
 | MX lookup: any other DNS error, or no resolver configuration | `Transient` | `Deferred` or `Expired` |
@@ -189,6 +191,7 @@ The rule, which is also in `CLAUDE.md`: no address and no message content ever l
 - DNS errors are replaced with fixed strings ("MX lookup failed", "recipient domain does not exist", "mail host lookup failed", "mail host has no public address"), because hickory's messages name the domain that was queried.
 - Errors without an SMTP reply become a fixed class in `deliver::no_reply` ("connection failed", "TLS failure", "timed out", "bad SMTP reply"), because lettre's source chain can name the recipient's MX host. `redact` is used only for real server replies.
 - `queue::pending` selects only the id, times, attempt count and error columns, never `mail_from`, `rcpt` or `data`.
+- The MTA-STS cache (`sts::Cache`) holds recipient domains, in memory only, for each policy's `max_age` (at most a year). It is never written to the database.
 
 ## Tests
 
@@ -214,6 +217,8 @@ The rule, which is also in `CLAUDE.md`: no address and no message content ever l
 | `permanent_failure_deletes_row` | A 550 gives `Failed`, the row is deleted, and the address quoted in the reply is redacted. |
 | `no_listener_defers` | Connection refused gives `Deferred` with the fixed error `connection failed`, and the row stays. |
 | `mx_route_refuses_a_loopback_host` | `Route::Mx` to `postmaster@localhost` (no MX, so the domain itself, which resolves to loopback) gives `Failed` with "mail host has no public address", and nothing connects. Checked by mutation: without the loopback rule it connects and defers. |
+| `sts::tests::*` (unit) | TXT discovery (exactly one `v=STSv1` record, id syntax), policy parsing and limits, `*.` matching one left label, HTTP: only a complete `200 text/plain`, no redirects, no chunking, and a `Content-Length` when TLS ended without `close_notify`; cache: a live policy survives a missing TXT, a new id refetches, a failed fetch waits 5 minutes. Each rule was checked by mutation. |
+| `sts_enforce_keeps_matching_mx_and_requires_tls` (unit) | `enforce` keeps only matching hosts and requires TLS; `testing` and no policy change nothing; no match leaves no host. |
 | `expires_past_max_age` | With `max_age` 0, a 451 gives `Expired`, and the row is deleted. |
 | `survives_reopen` | Enqueue, drop the `Outbox`, open the file again: the message still delivers, once. |
 | `open_checks_transport_security` | `Tls::None` to 192.0.2.1 and credentials with `Opportunistic` are refused; `Tls::None` to 127.0.0.1 is allowed. |
@@ -228,7 +233,7 @@ The fake server (`FakeSmtp::start(replies)`) listens on 127.0.0.1 on a random po
 
 **Doc tests**: every Rust block in the README compiles (`no_run`), so the usage guide cannot fall behind the API.
 
-The two things not tested here are TLS and real MX lookups, because both need the network or a CA. They are thin calls into lettre and hickory, which test them. The first real send is the end-to-end check.
+The two things not tested in CI are TLS and real DNS lookups, because both need the network or a CA. `sts::tests::fetches_a_real_policy` (ignored; run it with `cargo test --lib -- --ignored`) fetches gmail.com's live MTA-STS policy end to end. They are thin calls into lettre and hickory, which test them. The first real send is the end-to-end check.
 
 ## Dependencies
 
@@ -239,7 +244,9 @@ The two things not tested here are TLS and real MX lookups, because both need th
 | rustls-pki-types 1.15 | | `PrivateKeyDer::from_pem_slice`, to read PKCS#1 and PKCS#8 PEM. Already in the tree through rustls. |
 | hickory-resolver 0.26 | defaults (`tokio`, `system-config`) | MX lookups that tell NXDOMAIN, "no records" and other failures apart. |
 | rusqlite 0.41 | `bundled` | SQLite compiled in, so the host needs no SQLite package and the version is fixed. |
-| tokio 1 | `macros`, `sync`, `time` | `select!`, `Notify`, sleeps. The caller provides the runtime. |
+| tokio 1 | `macros`, `sync`, `time`, `net`, `io-util` | `select!`, `Notify`, sleeps, and the TCP connection for the MTA-STS fetch. The caller provides the runtime. |
+| tokio-rustls 0.26 | `aws_lc_rs`, `tls12` (default features off) | TLS for the MTA-STS policy fetch. Already in the tree through lettre and hickory, so no new crate. |
+| webpki-roots 1 | | The Mozilla roots for the MTA-STS fetch, the same store lettre uses. Already in the tree. |
 
 `Cargo.lock` is committed, and CI runs with `--locked`.
 
@@ -253,7 +260,8 @@ Rejected alternatives:
 The deliberate shortcuts are marked `ponytail:` in the code:
 
 - `src/lib.rs`, `run`: one delivery at a time. The upgrade is per-domain workers with a lease column.
-- `src/deliver.rs`, `attempt`: no MTA-STS or DANE for `Route::Mx`. The upgrade is an MTA-STS policy fetch and cache (RFC 8461) that restricts the MX list and forces `Tls::Required`, and later DANE (RFC 7672), which needs DNSSEC validation in the resolver. Both belong in `deliver.rs` between `lookup_mx` and `hops`.
+- `src/deliver.rs`, `attempt`: no DANE (RFC 7672). It needs a DNSSEC-validating resolver and TLSA checks inside the TLS verifier.
+- `src/sts.rs`, `policy`: a live policy whose new id fails to fetch is refetched on every attempt. No TLSRPT (RFC 8460), so `testing` mode only delivers.
 
 Also not built: bounce processing, connection reuse, Ed25519 DKIM, and a lock that stops two processes running the loop on one file.
 

@@ -6,7 +6,8 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ### Security
 
-- `Route::Mx` connects only to public addresses: each MX host is resolved, special-purpose addresses (loopback, private, link-local, CGNAT, documentation, multicast) are skipped, and TLS is verified for the MX name. At most 10 addresses per attempt. No MTA-STS or DANE yet.
+- `Route::Mx` connects only to public addresses: each MX host is resolved, special-purpose addresses (loopback, private, link-local, CGNAT, documentation, multicast) are skipped, and TLS is verified for the MX name. At most 10 addresses per attempt, IPv4 first.
+- `Route::Mx` applies MTA-STS (RFC 8461): in `enforce` mode only listed MX hosts are used, TLS with a verified certificate is required, and no match defers the message. Policies are fetched over HTTPS from a public address, cached in memory for `max_age`, and never stored on disk. No DANE or TLSRPT.
 
 ## [0.1.0] - 2026-11-07
 
