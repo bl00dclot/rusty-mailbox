@@ -304,6 +304,29 @@ async fn tampered_reply_to_fails_verification() {
 }
 
 #[tokio::test]
+async fn added_identity_header_fails_verification() {
+    let smtp = FakeSmtp::start(&[]).await;
+    let cfg = config(smtp.port).dkim("sender.example", "s1", DKIM_KEY);
+    let outbox = Outbox::open(db_path("oversign"), cfg).unwrap();
+    outbox.enqueue(message()).unwrap();
+    run_for(&outbox, 1).await;
+    let data = &smtp.transactions()[0].data;
+    assert!(dkim_verifies(data.as_bytes(), "s1", "sender.example").await);
+    // Over-signing: a second instance of a signed header, added in transit, breaks it.
+    for extra in [
+        "From: Boss <boss@sender.example>",
+        "Reply-To: <attacker@evil.example>",
+        "Subject: Urgent",
+    ] {
+        let forged = format!("{extra}\r\n{data}");
+        assert!(
+            !dkim_verifies(forged.as_bytes(), "s1", "sender.example").await,
+            "still verifies with {extra}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn delivered_content_is_gone_from_every_file() {
     let smtp = FakeSmtp::start(&[]).await;
     let path = db_path("residue");

@@ -12,7 +12,7 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - The delivery loop, `Outbox::run`: one attempt at a time, `min_interval` pacing, exponential backoff capped at 2 hours, and a `max_age` deadline.
 - `Route::Host` (a smarthost or a pinned MX) and `Route::Mx` (MX lookup, null MX, implicit MX).
 - `Tls::Required`, `Tls::Opportunistic`, and `Tls::None` (loopback only).
-- DKIM signing at enqueue, with mail-auth on AWS-LC: `Config::dkim(domain, selector, pem)`, RSA keys in PKCS#1 or PKCS#8 PEM. It signs From, To, Cc, Subject, Date, Message-ID, Reply-To, MIME-Version, Content-Type and Content-Transfer-Encoding, relaxed/relaxed. lettre's `dkim` feature is not used, because it depends on the `rsa` crate (RUSTSEC-2023-0071).
+- DKIM signing at enqueue, with mail-auth on AWS-LC: `Config::dkim(domain, selector, pem)`, RSA keys in PKCS#1 or PKCS#8 PEM. It signs From, To, Cc, Subject, Date, Message-ID, Reply-To, MIME-Version, Content-Type and Content-Transfer-Encoding, over-signed so none can be added in transit, relaxed/relaxed. lettre's `dkim` feature is not used, because it depends on the `rsa` crate (RUSTSEC-2023-0071).
 - Deleted rows are gone from every database file: `secure_delete` plus `wal_checkpoint(TRUNCATE)` whenever the delivery loop goes idle after a deletion.
 - Minimum Rust version 1.98. A C compiler is needed to build AWS-LC.
 - `Event` and `pending()`, both with address redaction. Errors without an SMTP reply are fixed strings.

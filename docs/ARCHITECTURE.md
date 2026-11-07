@@ -172,7 +172,7 @@ DkimSigner::from_key(key).domain(domain).selector(selector).headers(SIGNED_HEADE
 
 `enqueue` calls `sign(&formatted)` and writes `signature.to_header()` (which ends in CRLF) in front of the message bytes.
 
-- `SIGNED_HEADERS` lists `From`, `To`, `Cc`, `Subject`, `Date`, `Message-ID`, `Reply-To`, `MIME-Version`, `Content-Type` and `Content-Transfer-Encoding`. mail-auth also puts listed headers that the message lacks into `h=`, so they are signed as absent and cannot be added in transit (`tests/outbox.rs` checks `cc`).
+- `SIGNED_HEADERS` lists `From`, `To`, `Cc`, `Subject`, `Date`, `Message-ID`, `Reply-To`, `MIME-Version`, `Content-Type` and `Content-Transfer-Encoding`, each named twice. mail-auth signs every instance of a listed header that is present, then adds one `h=` entry for each listed name it did not match, which a verifier reads as an empty header. Naming each header twice therefore over-signs it: one extra empty entry for a present header, so a second `From:` added in transit breaks the signature, and the same for an absent one such as `Cc` (`added_identity_header_fails_verification`).
 - Canonicalization is mail-auth's default, `relaxed/relaxed`. That survives the line-ending and whitespace changes that relays make.
 - `Bcc` is never in the signed bytes: it is removed from the message before `formatted()`.
 - RSA only, marked `ponytail:` on `Config::dkim`. mail-auth can also sign Ed25519; adding it is an algorithm argument and a second key type.
@@ -205,6 +205,7 @@ The rule, which is also in `CLAUDE.md`: no address and no message content ever l
 | `delivers_signed_and_deletes_row` | The row is deleted and `Delivered` fires. The data has `DKIM-Signature` with the right `d=` and `s=`, and the original `Reply-To`. The signature verifies with mail-auth's verifier against the test key's TXT record, and `h=` covers From, To, Cc (absent), Subject, Date, Message-ID and Reply-To. |
 | `accepts_pkcs8_key_and_signature_verifies` | A PKCS#8 key opens, and its signature verifies. |
 | `tampered_reply_to_fails_verification` | Changing `Reply-To` after signing breaks the signature. |
+| `added_identity_header_fails_verification` | Prepending a second `From`, `Reply-To` or `Subject` after signing breaks the signature (over-signing). |
 | `one_transaction_per_recipient_without_bcc_header` | To, Cc and Bcc give three transactions with one `RCPT TO` each, and no `Bcc:` header or Bcc address in the data. |
 | `transient_failure_defers_then_retries` | A 451 gives `Deferred`; `pending()` shows `attempts = 1` and the 451 text; with `retry_base` 0 the next run delivers. |
 | `permanent_failure_deletes_row` | A 550 gives `Failed`, the row is deleted, and the address quoted in the reply is redacted. |

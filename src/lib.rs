@@ -392,18 +392,30 @@ impl Outbox {
     }
 }
 
-/// Every header that a receiver shows or acts on. A header named here but absent from
-/// a message is signed as absent, so it cannot be added later either.
-const SIGNED_HEADERS: [&str; 10] = [
+/// Every header that a receiver shows or acts on, each named twice. mail-auth signs every
+/// instance present and adds one empty `h=` entry for each name it did not match, so the
+/// second name over-signs: a header added in transit, absent or present, breaks the
+/// signature.
+const SIGNED_HEADERS: [&str; 20] = [
+    "From",
     "From",
     "To",
+    "To",
+    "Cc",
     "Cc",
     "Subject",
+    "Subject",
+    "Date",
     "Date",
     "Message-ID",
+    "Message-ID",
+    "Reply-To",
     "Reply-To",
     "MIME-Version",
+    "MIME-Version",
     "Content-Type",
+    "Content-Type",
+    "Content-Transfer-Encoding",
     "Content-Transfer-Encoding",
 ];
 

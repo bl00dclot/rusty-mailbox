@@ -196,7 +196,7 @@ let config = Config::new(route, "mail.example.com").dkim("mail.example.com", "s1
 
 - **The key** is an RSA key in PEM, either PKCS#1 (`BEGIN RSA PRIVATE KEY`, from `openssl genrsa -traditional 2048`) or PKCS#8 (`BEGIN PRIVATE KEY`, what `openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048` writes). Use 2048 bits. A key that does not parse fails `open` with `Error::Dkim`.
 - **Signing happens once, at `enqueue`.** The stored bytes are exactly the bytes sent, on every retry.
-- **What is signed:** the body, and the headers `From`, `To`, `Cc`, `Subject`, `Date`, `Message-ID`, `Reply-To`, `MIME-Version`, `Content-Type` and `Content-Transfer-Encoding`. A header in that list that the message does not have is signed as absent, so it cannot be added on the way either. `rsa-sha256`, `relaxed/relaxed` canonicalization.
+- **What is signed:** the body, and the headers `From`, `To`, `Cc`, `Subject`, `Date`, `Message-ID`, `Reply-To`, `MIME-Version`, `Content-Type` and `Content-Transfer-Encoding`. Each is over-signed: a second copy of any of them, or one the message did not have, cannot be added on the way without breaking the signature. `rsa-sha256`, `relaxed/relaxed` canonicalization.
 - **RSA only** for now. Ed25519 (RFC 8463) is not offered, because many receivers still ignore Ed25519 signatures.
 - **Rotating the key:** publish the new selector, restart with the new key and selector, and keep the old selector's DNS record until `max_age` has passed. Rows already queued carry signatures made with the old key.
 
