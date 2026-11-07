@@ -4,6 +4,8 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-07
+
 ### Security
 
 - `Route::Mx` connects only to public addresses: each MX host is resolved, special-purpose addresses (loopback, private, link-local, CGNAT, documentation, multicast) are skipped, and TLS is verified for the MX name. At most 10 addresses per attempt, IPv4 first.
@@ -25,5 +27,6 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - `Route::Mx` has no MTA-STS or DANE.
 - Licensed under MIT OR Apache-2.0.
 
-[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bl00dclot/rusty-mailbox/releases/tag/v0.1.0
