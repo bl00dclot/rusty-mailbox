@@ -14,12 +14,12 @@ description = "Durable SQLite-backed outbox that delivers lettre messages over S
 [dependencies]
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls", "webpki-roots", "aws-lc-rs"] }
 mail-auth = "0.15.1"
-rustls-pki-types = "1.15"
+rustls-pki-types = "1.16"
 hickory-resolver = "0.26.3"
-rusqlite = { version = "0.41.1", features = ["bundled"] }
+rusqlite = { version = "0.42.0", features = ["bundled"] }
 tokio = { version = "1.54.1", features = ["macros", "sync", "time", "net", "io-util"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
-webpki-roots = "1.0.11"
+webpki-roots = "1.0.12"
 
 [dev-dependencies]
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "io-util", "time", "signal"] }
