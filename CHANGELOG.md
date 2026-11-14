@@ -4,6 +4,12 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-14
+
+### Changed
+
+- Dependencies: rusqlite 0.42 (bundled SQLite via libsqlite3-sys 0.40), rustls-pki-types 1.16, webpki-roots 1.0.12, and compatible updates across the lockfile. aws-lc-rs stays at 1.18.2 so the tree keeps one aws-lc-sys.
+
 ## [0.1.1] - 2026-11-07
 
 ### Security
@@ -27,6 +33,7 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - `Route::Mx` has no MTA-STS or DANE.
 - Licensed under MIT OR Apache-2.0.
 
-[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bl00dclot/rusty-mailbox/releases/tag/v0.1.0
