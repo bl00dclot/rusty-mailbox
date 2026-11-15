@@ -243,7 +243,7 @@ The two things not tested in CI are TLS and real DNS lookups, because both need 
 | mail-auth 0.15 | defaults (`aws-lc-rs`, `dns-hickory`) | DKIM signing on AWS-LC. A DNS backend is mandatory; it shares hickory 0.26 with this crate. It also brings mail-parser, which sets the 1.98 minimum Rust version. |
 | rustls-pki-types 1.15 | | `PrivateKeyDer::from_pem_slice`, to read PKCS#1 and PKCS#8 PEM. Already in the tree through rustls. |
 | hickory-resolver 0.26 | defaults (`tokio`, `system-config`) | MX lookups that tell NXDOMAIN, "no records" and other failures apart. |
-| rusqlite 0.41 | `bundled` | SQLite compiled in, so the host needs no SQLite package and the version is fixed. |
+| rusqlite 0.39 | `bundled` | SQLite compiled in, so the host needs no SQLite package and the version is fixed. |
 | tokio 1 | `macros`, `sync`, `time`, `net`, `io-util` | `select!`, `Notify`, sleeps, and the TCP connection for the MTA-STS fetch. The caller provides the runtime. |
 | tokio-rustls 0.26 | `aws_lc_rs`, `tls12` (default features off) | TLS for the MTA-STS policy fetch. Already in the tree through lettre and hickory, so no new crate. |
 | webpki-roots 1 | | The Mozilla roots for the MTA-STS fetch, the same store lettre uses. Already in the tree. |
