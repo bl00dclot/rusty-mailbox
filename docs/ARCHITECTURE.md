@@ -240,7 +240,7 @@ The two things not tested in CI are TLS and real DNS lookups, because both need 
 | Crate | Features | Why |
 | --- | --- | --- |
 | lettre 0.11 | `builder`, `smtp-transport`, `tokio1-rustls`, `webpki-roots`, `aws-lc-rs` (default features off) | Message builder, SMTP client and STARTTLS. The defaults would pull in native-tls (OpenSSL) and `hostname`; `dkim` would pull in `rsa`; `tokio1-rustls-tls` would pull in `ring`. |
-| mail-auth 0.15 | defaults (`aws-lc-rs`, `dns-hickory`) | DKIM signing on AWS-LC. A DNS backend is mandatory; it shares hickory 0.26 with this crate. It also brings mail-parser, which sets the 1.98 minimum Rust version. |
+| mail-auth 0.16 (git, rev `da47a34eb6`) | `aws-lc-rs` only (default features off) | DKIM signing on AWS-LC. A DNS backend is mandatory; it shares hickory 0.26 with this crate. It also brings mail-parser, which sets the 1.98 minimum Rust version. The default `rustls-platform-verifier` feature would add rustls-platform-verifier and rustls-native-certs, which read the system CA store; this crate's TLS uses webpki-roots only, so it runs in images with no CA bundle. Pinned to an unreleased commit (v0.15.1 plus that feature split) until mail-auth releases it; `deny.toml` allows that one git source. |
 | rustls-pki-types 1.15 | | `PrivateKeyDer::from_pem_slice`, to read PKCS#1 and PKCS#8 PEM. Already in the tree through rustls. |
 | hickory-resolver 0.26 | defaults (`tokio`, `system-config`) | MX lookups that tell NXDOMAIN, "no records" and other failures apart. |
 | rusqlite 0.41 | `bundled` | SQLite compiled in, so the host needs no SQLite package and the version is fixed. |

@@ -4,6 +4,12 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-15
+
+### Changed
+
+- No crate that reads the system CA store is in the tree: rustls-platform-verifier, rustls-native-certs and openssl-probe are gone, so the crate builds and runs in images with no CA bundle. All TLS (SMTP, MTA-STS policy fetch) already verified against webpki-roots. mail-auth's default features turned these on, through hickory; mail-auth is now built with `default-features = false, features = ["aws-lc-rs"]`, from its unreleased commit da47a34eb6 (v0.15.1 plus an optional platform verifier), until that change is released. `deny.toml` allows that git source and now bans rustls-native-certs and rustls-platform-verifier.
+
 ## [0.1.4] - 2026-11-15
 
 ### Security
@@ -53,7 +59,8 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - `Route::Mx` has no MTA-STS or DANE.
 - Licensed under MIT OR Apache-2.0.
 
-[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.1...v0.1.2

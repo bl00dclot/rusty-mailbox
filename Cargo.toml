@@ -1,6 +1,6 @@
 [package]
 name = "rusty-mailbox"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT OR Apache-2.0"
@@ -13,7 +13,9 @@ description = "Durable SQLite-backed outbox that delivers lettre messages over S
 
 [dependencies]
 lettre = { version = "0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls", "webpki-roots", "aws-lc-rs"] }
-mail-auth = "0.15.1"
+# Unreleased mail-auth main at da47a34eb6 (v0.15.1 plus #65, an optional rustls-platform-verifier):
+# keeps rustls-platform-verifier and rustls-native-certs out of the tree. Move to crates.io once released.
+mail-auth = { version = "0.16.0", git = "https://github.com/stalwartlabs/mail-auth", rev = "da47a34eb6cd31c787c2b4d9b2f449245cea9253", default-features = false, features = ["aws-lc-rs"] }
 rustls-pki-types = "1.16"
 hickory-resolver = "0.26.3"
 rusqlite = { version = "0.41", features = ["bundled"] }
