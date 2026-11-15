@@ -33,7 +33,7 @@ The crate is not on crates.io. Depend on the git repository and pin a tag:
 
 ```toml
 [dependencies]
-rusty-mailbox = { git = "https://github.com/bl00dclot/rusty-mailbox", tag = "v0.1.2" }
+rusty-mailbox = { git = "https://github.com/bl00dclot/rusty-mailbox", tag = "v0.1.3" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 ```
 

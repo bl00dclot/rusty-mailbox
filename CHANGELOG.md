@@ -4,6 +4,16 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-15
+
+### Changed
+
+- rusqlite 0.42 back to 0.39 (libsqlite3-sys 0.37). sqlx 0.9 accepts only libsqlite3-sys >=0.30.1, <0.38, and Cargo links one `sqlite3` per build, so 0.1.2 could not share a build with it. A dependent that also uses rusqlite directly must use 0.39 as well.
+
+### Security
+
+- The bundled SQLite (libsqlite3-sys 0.37) is older than 3.54 and is affected by RUSTSEC-2026-0459: a database opened together with a crafted `-wal` file of a different page size can return stale process memory. It is local only. See SECURITY.md.
+
 ## [0.1.2] - 2026-11-14
 
 ### Changed
@@ -33,7 +43,8 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - `Route::Mx` has no MTA-STS or DANE.
 - Licensed under MIT OR Apache-2.0.
 
-[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bl00dclot/rusty-mailbox/releases/tag/v0.1.0

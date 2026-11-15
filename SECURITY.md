@@ -22,4 +22,5 @@ These are documented in the README:
 - `Route::Mx` does not implement DANE or TLSRPT. For a domain without an MTA-STS policy, DNS decides which public host receives the mail. MTA-STS policies are cached in memory only, so the first attempt after a restart trusts DNS for the policy record.
 - Redaction masks words containing `@`. A server reply can still identify a recipient without one (`550 jdoe unavailable`), and a quoted local part containing a space is only partly masked. Connection and TLS errors are fixed strings.
 - Delivery is at least once, so duplicates are possible.
+- The bundled SQLite is older than 3.54 (rusqlite 0.39, kept so the crate builds alongside sqlx 0.9) and is affected by RUSTSEC-2026-0459: a database opened together with a crafted `-wal` file of a different page size can return stale process memory. It needs someone who can write files into the outbox's directory, so keep that directory private to the service user.
 - Until the delivery loop next goes idle, recently deleted rows can remain in the SQLite `-wal` file. Disk blocks freed by truncating it keep their bytes until the file system reuses them.
