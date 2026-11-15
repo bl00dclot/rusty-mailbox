@@ -4,6 +4,16 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-15
+
+### Security
+
+- rusqlite 0.39 to 0.41 (libsqlite3-sys 0.39.1, bundled SQLite 3.54.1), which fixes RUSTSEC-2026-0459. `deny.toml` no longer ignores it, and SECURITY.md no longer lists it.
+
+### Changed
+
+- Builds alongside sqlx 0.9.1, which accepts libsqlite3-sys < 0.40. sqlx 0.9.0 (libsqlite3-sys < 0.38) cannot share a build with this release; use 0.1.3 with it.
+
 ## [0.1.3] - 2026-11-15
 
 ### Changed
@@ -43,7 +53,8 @@ All notable changes to this crate. The format follows [Keep a Changelog](https:/
 - `Route::Mx` has no MTA-STS or DANE.
 - Licensed under MIT OR Apache-2.0.
 
-[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/bl00dclot/rusty-mailbox/compare/v0.1.0...v0.1.1
