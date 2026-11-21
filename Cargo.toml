@@ -18,7 +18,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["builder",
 mail-auth = { version = "0.16.0", git = "https://github.com/stalwartlabs/mail-auth", rev = "da47a34eb6cd31c787c2b4d9b2f449245cea9253", default-features = false, features = ["aws-lc-rs"] }
 rustls-pki-types = "1.16"
 hickory-resolver = "0.26.3"
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 tokio = { version = "1.54.1", features = ["macros", "sync", "time", "net", "io-util"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["aws_lc_rs", "tls12"] }
 webpki-roots = "1.0.12"
